@@ -548,13 +548,17 @@ async function initSupabase() {
   if (sb) return sb;
   try {
     const res = await fetch('/api/config');
-    const { supabaseUrl, supabaseKey } = await res.json();
-    if (!supabaseUrl || !supabaseKey) throw new Error('Missing environment variables');
-    sb = supabase.createClient(supabaseUrl, supabaseKey);
+    const data = await res.json();
+    
+    if (!res.ok) {
+      throw new Error(data.error || `HTTP error ${res.status}`);
+    }
+    
+    sb = supabase.createClient(data.supabaseUrl, data.supabaseKey);
     return sb;
   } catch (err) {
     console.error('Config fetch error:', err);
-    throw new Error('Failed to load Supabase config. Are Vercel env vars set?');
+    throw new Error(err.message);
   }
 }
 
