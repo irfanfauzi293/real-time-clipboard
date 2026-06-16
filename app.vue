@@ -185,6 +185,8 @@ let toastTimer = null
 let channel = null
 let isRemoteUpdate = false
 let debounceTimer = null
+let typingTimeout = null
+let isTyping = false
 const DEBOUNCE_MS = 400
 
 // --- Computed ---
@@ -259,10 +261,18 @@ async function subscribeToRoom(roomId) {
           filter: `id=eq.${roomId}`,
         },
         (payload) => {
-          // Only apply if this is a remote change
+          // Ignore incoming updates if we are actively typing to prevent cursor jumps
+          if (isTyping) return
+          // Ignore echoes of our own updates
+          if (payload.new.text === text.value) return
+
+          // Apply remote change
           isRemoteUpdate = true
           text.value = payload.new.text || ''
-          isRemoteUpdate = false
+          
+          nextTick(() => {
+            isRemoteUpdate = false
+          })
           lastSync.value = Date.now()
         }
       )
@@ -315,6 +325,14 @@ function leaveRoom() {
 
 function onTextInput() {
   if (isRemoteUpdate) return
+
+  // Lock incoming updates while typing
+  isTyping = true
+  clearTimeout(typingTimeout)
+  typingTimeout = setTimeout(() => {
+    isTyping = false
+  }, 1000)
+
   clearTimeout(debounceTimer)
   debounceTimer = setTimeout(() => {
     pushUpdate(text.value)
