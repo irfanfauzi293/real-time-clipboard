@@ -6,6 +6,7 @@
   <title>ClipSync — Real-Time Clipboard</title>
   <meta name="description" content="Share text instantly across devices with private room-based real-time clipboard sync." />
   <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
@@ -336,7 +337,7 @@
       padding: 20px 24px 24px;
     }
 
-    /* Textarea card — grows to fill */
+    /* Textarea card */
     .textarea-card {
       flex: 1;
       display: flex;
@@ -351,7 +352,6 @@
       border-color: rgba(139, 92, 246, 0.2);
     }
 
-    /* Divider inside textarea card */
     .card-footer {
       padding: 12px 24px;
       display: flex;
@@ -362,10 +362,8 @@
       color: var(--text-muted);
     }
 
-    /* Landing card width */
     .landing-card { width: 100%; max-width: 420px; }
 
-    /* Responsive */
     @media (max-width: 640px) {
       .room-layout { padding: 16px; }
       .clip-textarea { padding: 16px; font-size: 14px; }
@@ -481,10 +479,10 @@
               <h2 style="font-size: 15px; font-weight: 700; color: var(--text-primary); letter-spacing: -0.01em;">{{ currentRoom }}</h2>
               <span class="status-badge" :class="connected ? 'live' : 'offline'">
                 <span class="status-dot" :class="connected ? 'live' : 'offline'"></span>
-                {{ connected ? 'Live' : 'Syncing…' }}
+                {{ connected ? 'Live' : 'Connecting…' }}
               </span>
             </div>
-            <p style="font-size: 11px; color: var(--text-tertiary); margin-top: 2px;">Polling every 800ms</p>
+            <p style="font-size: 11px; color: var(--text-tertiary); margin-top: 2px;">Real-time sync via Supabase</p>
           </div>
         </div>
 
@@ -499,7 +497,7 @@
           <button id="clear-btn" @click="clearText" class="btn btn-ghost danger">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <polyline points="3 6 5 6 21 6"/>
-              <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
+              <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a1 1 0 011-1h4a1 1 0 011 1v2"/>
             </svg>
             Clear
           </button>
@@ -543,6 +541,17 @@
 <script>
 const { createApp, ref, computed, onMounted, onUnmounted, nextTick } = Vue;
 
+// --- Supabase client (loaded from env via API) ---
+let sb = null;
+
+async function initSupabase() {
+  if (sb) return sb;
+  const res = await fetch('/api/config');
+  const { supabaseUrl, supabaseKey } = await res.json();
+  sb = supabase.createClient(supabaseUrl, supabaseKey);
+  return sb;
+}
+
 createApp({
   setup() {
     const view = ref('landing');
@@ -556,14 +565,11 @@ createApp({
     const toast = ref({ visible: false, message: '', icon: 'check', entering: true });
     let toastTimer = null;
 
-    // Polling state
-    let pollTimer = null;
-    let localVersion = 0;
+    // Supabase state
+    let channel = null;
     let isRemoteUpdate = false;
-    let pendingUpdate = null;
     let debounceTimer = null;
-    const POLL_INTERVAL = 800;
-    const DEBOUNCE_MS = 300;
+    const DEBOUNCE_MS = 400;
 
     // --- Computed ---
     const charCount = computed(() => text.value.length);
@@ -598,53 +604,70 @@ createApp({
       localStorage.setItem('clipsync_recent', JSON.stringify(list));
     }
 
-    // --- HTTP Polling ---
-    async function fetchRoom() {
-      try {
-        const res = await fetch(`/api/rooms/${encodeURIComponent(currentRoom.value)}`);
-        if (!res.ok) throw new Error('fetch failed');
-        const data = await res.json();
-        connected.value = true;
+    // --- Supabase Realtime ---
+    async function subscribeToRoom(roomId) {
+      const client = await initSupabase();
 
-        // Only update if server has a newer version than what we last sent
-        if (data.version > localVersion) {
-          localVersion = data.version;
-          isRemoteUpdate = true;
-          text.value = data.text;
-          isRemoteUpdate = false;
-          lastSync.value = Date.now();
+      // Upsert: create room if it doesn't exist, or fetch existing
+      const { data, error } = await client
+        .from('rooms')
+        .upsert({ id: roomId }, { onConflict: 'id', ignoreDuplicates: true })
+        .select()
+        .single();
+
+      if (error && error.code !== '23505') {
+        // If upsert fails (not a duplicate), try just fetching
+        const { data: existing } = await client.from('rooms').select().eq('id', roomId).single();
+        if (existing) {
+          text.value = existing.text || '';
         }
-      } catch {
-        connected.value = false;
+      } else if (data) {
+        text.value = data.text || '';
       }
+
+      lastSync.value = Date.now();
+
+      // Subscribe to realtime changes on this room
+      channel = client
+        .channel(`room-${roomId}`)
+        .on(
+          'postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'rooms',
+            filter: `id=eq.${roomId}`,
+          },
+          (payload) => {
+            // Only apply if this is a remote change
+            isRemoteUpdate = true;
+            text.value = payload.new.text || '';
+            isRemoteUpdate = false;
+            lastSync.value = Date.now();
+          }
+        )
+        .subscribe((status) => {
+          connected.value = (status === 'SUBSCRIBED');
+        });
     }
 
-    function startPolling() {
-      fetchRoom(); // Initial fetch
-      pollTimer = setInterval(fetchRoom, POLL_INTERVAL);
-    }
-
-    function stopPolling() {
-      clearInterval(pollTimer);
-      clearTimeout(debounceTimer);
-      pollTimer = null;
+    function unsubscribeFromRoom() {
+      if (channel && sb) {
+        sb.removeChannel(channel);
+        channel = null;
+      }
       connected.value = false;
     }
 
     async function pushUpdate(newText) {
-      try {
-        const res = await fetch(`/api/rooms/${encodeURIComponent(currentRoom.value)}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: newText }),
-        });
-        if (!res.ok) throw new Error('push failed');
-        const data = await res.json();
-        localVersion = data.version;
+      if (!sb) return;
+      const { error } = await sb
+        .from('rooms')
+        .update({ text: newText, updated_at: new Date().toISOString() })
+        .eq('id', currentRoom.value);
+
+      if (!error) {
         lastSync.value = Date.now();
-        connected.value = true;
-      } catch {
-        connected.value = false;
       }
     }
 
@@ -653,22 +676,20 @@ createApp({
       if (!roomInput.value) return;
       currentRoom.value = roomInput.value;
       saveRecent(currentRoom.value);
-      localVersion = 0;
       view.value = 'room';
-      nextTick(() => startPolling());
+      nextTick(() => subscribeToRoom(currentRoom.value));
     }
 
     function leaveRoom() {
-      stopPolling();
+      unsubscribeFromRoom();
+      clearTimeout(debounceTimer);
       text.value = '';
       currentRoom.value = '';
-      localVersion = 0;
       view.value = 'landing';
     }
 
     function onTextInput() {
       if (isRemoteUpdate) return;
-      // Debounce outgoing updates
       clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => {
         pushUpdate(text.value);
@@ -686,15 +707,7 @@ createApp({
 
     async function clearText() {
       text.value = '';
-      try {
-        const res = await fetch(`/api/rooms/${encodeURIComponent(currentRoom.value)}`, {
-          method: 'DELETE',
-        });
-        if (res.ok) {
-          const data = await res.json();
-          localVersion = data.version;
-        }
-      } catch {}
+      await pushUpdate('');
       showToast('Clipboard cleared');
     }
 
@@ -706,7 +719,7 @@ createApp({
     });
     onUnmounted(() => {
       clearInterval(syncDisplayInterval);
-      stopPolling();
+      unsubscribeFromRoom();
     });
 
     return {
