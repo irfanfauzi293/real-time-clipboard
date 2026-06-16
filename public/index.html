@@ -1,0 +1,715 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ClipSync — Real-Time Clipboard</title>
+  <meta name="description" content="Share text instantly across devices with private room-based real-time clipboard sync." />
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg-primary: #0a0a0f;
+      --bg-secondary: #12121a;
+      --bg-card: #16161f;
+      --bg-elevated: #1c1c28;
+      --bg-input: #1a1a26;
+      --border-subtle: rgba(255, 255, 255, 0.06);
+      --border-medium: rgba(255, 255, 255, 0.09);
+      --border-focus: rgba(139, 92, 246, 0.4);
+      --text-primary: #f0f0f5;
+      --text-secondary: #a0a0b8;
+      --text-tertiary: #5a5a72;
+      --text-muted: #3d3d50;
+      --accent-purple: #8b5cf6;
+      --accent-purple-glow: rgba(139, 92, 246, 0.15);
+      --accent-emerald: #34d399;
+      --accent-emerald-glow: rgba(52, 211, 153, 0.12);
+      --accent-red: #f87171;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      min-height: 100vh;
+      overflow-x: hidden;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    /* Background ambient lighting */
+    .ambient-bg {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 0;
+      overflow: hidden;
+    }
+    .ambient-bg .orb {
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(100px);
+      opacity: 0.35;
+    }
+    .ambient-bg .orb-1 {
+      width: 500px; height: 500px;
+      background: radial-gradient(circle, rgba(139, 92, 246, 0.18), transparent 70%);
+      top: -15%; right: -8%;
+      animation: float-1 20s ease-in-out infinite;
+    }
+    .ambient-bg .orb-2 {
+      width: 400px; height: 400px;
+      background: radial-gradient(circle, rgba(52, 211, 153, 0.1), transparent 70%);
+      bottom: -10%; left: -5%;
+      animation: float-2 25s ease-in-out infinite;
+    }
+    .ambient-bg .orb-3 {
+      width: 300px; height: 300px;
+      background: radial-gradient(circle, rgba(99, 102, 241, 0.08), transparent 70%);
+      top: 40%; left: 50%;
+      animation: float-3 18s ease-in-out infinite;
+    }
+
+    @keyframes float-1 {
+      0%, 100% { transform: translate(0, 0) scale(1); }
+      33% { transform: translate(-30px, 40px) scale(1.05); }
+      66% { transform: translate(20px, -20px) scale(0.95); }
+    }
+    @keyframes float-2 {
+      0%, 100% { transform: translate(0, 0) scale(1); }
+      50% { transform: translate(40px, -30px) scale(1.08); }
+    }
+    @keyframes float-3 {
+      0%, 100% { transform: translate(0, 0); }
+      50% { transform: translate(-50px, 30px); }
+    }
+
+    /* Custom scrollbar */
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--text-muted); border-radius: 99px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--text-tertiary); }
+
+    /* Shared card style */
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: 16px;
+    }
+
+    /* Input */
+    .input-field {
+      width: 100%;
+      background: var(--bg-input);
+      border: 1.5px solid var(--border-medium);
+      border-radius: 12px;
+      padding: 14px 18px;
+      font-size: 14px;
+      font-family: inherit;
+      color: var(--text-primary);
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .input-field::placeholder { color: var(--text-muted); }
+    .input-field:focus {
+      border-color: var(--border-focus);
+      box-shadow: 0 0 0 3px var(--accent-purple-glow);
+    }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      font-family: inherit;
+      font-weight: 600;
+      font-size: 13px;
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+      white-space: nowrap;
+    }
+    .btn:active { transform: scale(0.97); }
+
+    .btn-primary {
+      background: var(--accent-purple);
+      color: white;
+      padding: 14px 28px;
+      box-shadow: 0 4px 24px rgba(139, 92, 246, 0.25), inset 0 1px 0 rgba(255,255,255,0.1);
+    }
+    .btn-primary:hover {
+      background: #7c3aed;
+      box-shadow: 0 6px 32px rgba(139, 92, 246, 0.35), inset 0 1px 0 rgba(255,255,255,0.1);
+      transform: translateY(-1px);
+    }
+    .btn-primary:disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+    }
+
+    .btn-ghost {
+      background: transparent;
+      color: var(--text-secondary);
+      border: 1px solid var(--border-medium);
+      padding: 10px 16px;
+    }
+    .btn-ghost:hover {
+      background: var(--bg-elevated);
+      border-color: rgba(255, 255, 255, 0.12);
+      color: var(--text-primary);
+    }
+    .btn-ghost.danger:hover {
+      color: var(--accent-red);
+      border-color: rgba(248, 113, 113, 0.2);
+      background: rgba(248, 113, 113, 0.06);
+    }
+
+    .btn-icon {
+      width: 38px;
+      height: 38px;
+      padding: 0;
+      background: transparent;
+      color: var(--text-tertiary);
+      border: 1px solid transparent;
+    }
+    .btn-icon:hover {
+      background: var(--bg-elevated);
+      border-color: var(--border-subtle);
+      color: var(--text-secondary);
+    }
+
+    /* Textarea */
+    .clip-textarea {
+      width: 100%;
+      height: 100%;
+      min-height: 0;
+      background: transparent;
+      border: none;
+      outline: none;
+      resize: none;
+      font-family: 'Inter', system-ui, sans-serif;
+      font-size: 14px;
+      line-height: 1.75;
+      color: var(--text-primary);
+      padding: 24px;
+    }
+    .clip-textarea::placeholder {
+      color: var(--text-muted);
+      line-height: 1.75;
+    }
+
+    /* Status badge */
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 10px 3px 7px;
+      border-radius: 99px;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+    .status-badge.live {
+      background: rgba(52, 211, 153, 0.08);
+      color: var(--accent-emerald);
+    }
+    .status-badge.offline {
+      background: rgba(248, 113, 113, 0.08);
+      color: var(--accent-red);
+    }
+
+    /* Pulse */
+    .status-dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      position: relative;
+    }
+    .status-dot.live { background: var(--accent-emerald); }
+    .status-dot.offline { background: var(--accent-red); }
+    .status-dot.live::after {
+      content: '';
+      position: absolute;
+      inset: -3px;
+      border-radius: 50%;
+      background: var(--accent-emerald);
+      opacity: 0;
+      animation: ping 2s cubic-bezier(0, 0, 0.2, 1) infinite;
+    }
+    @keyframes ping {
+      0% { transform: scale(1); opacity: 0.6; }
+      100% { transform: scale(2.2); opacity: 0; }
+    }
+
+    /* Page transitions */
+    .view-enter { animation: viewIn 0.35s ease forwards; }
+    @keyframes viewIn {
+      from { opacity: 0; transform: translateY(16px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Toast */
+    .toast-container {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 100;
+    }
+    .toast {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-medium);
+      border-radius: 12px;
+      padding: 12px 20px;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+      backdrop-filter: blur(16px);
+    }
+    .toast-in { animation: toastIn 0.3s ease forwards; }
+    .toast-out { animation: toastOut 0.25s ease forwards; }
+    @keyframes toastIn {
+      from { opacity: 0; transform: translateY(12px) scale(0.96); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    @keyframes toastOut {
+      from { opacity: 1; transform: translateY(0) scale(1); }
+      to { opacity: 0; transform: translateY(12px) scale(0.96); }
+    }
+
+    /* Recent room chip */
+    .room-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .room-chip:hover {
+      border-color: var(--border-focus);
+      color: var(--text-primary);
+      background: rgba(139, 92, 246, 0.06);
+    }
+
+    /* Layout helpers */
+    .app-wrapper {
+      position: relative;
+      z-index: 1;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    .center-layout {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .room-layout {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      max-width: 860px;
+      margin: 0 auto;
+      width: 100%;
+      padding: 20px 24px 24px;
+    }
+
+    /* Textarea card — grows to fill */
+    .textarea-card {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: 16px;
+      overflow: hidden;
+      transition: border-color 0.2s;
+    }
+    .textarea-card:focus-within {
+      border-color: rgba(139, 92, 246, 0.2);
+    }
+
+    /* Divider inside textarea card */
+    .card-footer {
+      padding: 12px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-top: 1px solid var(--border-subtle);
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    /* Landing card width */
+    .landing-card { width: 100%; max-width: 420px; }
+
+    /* Responsive */
+    @media (max-width: 640px) {
+      .room-layout { padding: 16px; }
+      .clip-textarea { padding: 16px; font-size: 14px; }
+      .header-actions { gap: 6px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- Ambient background -->
+<div class="ambient-bg" aria-hidden="true">
+  <div class="orb orb-1"></div>
+  <div class="orb orb-2"></div>
+  <div class="orb orb-3"></div>
+</div>
+
+<div id="app" class="app-wrapper">
+
+  <!-- ============================================ -->
+  <!-- LANDING VIEW                                 -->
+  <!-- ============================================ -->
+  <template v-if="view === 'landing'">
+    <div class="center-layout">
+      <div class="landing-card view-enter">
+
+        <!-- Brand -->
+        <div style="text-align: center; margin-bottom: 44px;">
+          <div style="display: inline-flex; align-items: center; justify-content: center; width: 56px; height: 56px; border-radius: 16px; background: linear-gradient(135deg, var(--accent-purple), #6366f1); margin-bottom: 20px; box-shadow: 0 8px 32px rgba(139, 92, 246, 0.25);">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/>
+              <rect x="9" y="3" width="6" height="4" rx="2"/>
+            </svg>
+          </div>
+          <h1 style="font-size: 28px; font-weight: 800; letter-spacing: -0.03em; color: var(--text-primary);">ClipSync</h1>
+          <p style="margin-top: 8px; font-size: 14px; color: var(--text-tertiary); font-weight: 400;">Share your clipboard across devices in real-time</p>
+        </div>
+
+        <!-- Join Card -->
+        <div class="card" style="padding: 28px;">
+          <label for="room-input" style="display: block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-tertiary); margin-bottom: 10px;">Room Code</label>
+          <input
+            id="room-input"
+            v-model.trim="roomInput"
+            @keydown.enter="joinRoom"
+            type="text"
+            placeholder="Enter a room name…"
+            autocomplete="off"
+            spellcheck="false"
+            class="input-field"
+            style="margin-bottom: 16px;"
+          />
+          <button
+            id="join-btn"
+            @click="joinRoom"
+            :disabled="!roomInput"
+            class="btn btn-primary"
+            style="width: 100%; font-size: 14px;"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4"/>
+              <polyline points="10 17 15 12 10 7"/>
+              <line x1="15" y1="12" x2="3" y2="12"/>
+            </svg>
+            Join Room
+          </button>
+
+          <div style="margin-top: 18px; display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-muted);">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+              <path d="M7 11V7a5 5 0 0110 0v4"/>
+            </svg>
+            <span>Rooms are private — only people with the code can join</span>
+          </div>
+        </div>
+
+        <!-- Recent Rooms -->
+        <div v-if="recentRooms.length" style="margin-top: 28px;">
+          <p style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin-bottom: 10px; padding-left: 2px;">Recent rooms</p>
+          <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+            <button
+              v-for="r in recentRooms"
+              :key="r"
+              @click="roomInput = r; joinRoom()"
+              class="room-chip"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 12l2 2 4-4"/></svg>
+              {{ r }}
+            </button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </template>
+
+  <!-- ============================================ -->
+  <!-- MAIN CLIPBOARD VIEW                          -->
+  <!-- ============================================ -->
+  <template v-if="view === 'room'">
+    <div class="room-layout view-enter">
+
+      <!-- Header -->
+      <header style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <button id="back-btn" @click="leaveRoom" class="btn btn-icon" title="Leave room">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="19" y1="12" x2="5" y2="12"/>
+              <polyline points="12 19 5 12 12 5"/>
+            </svg>
+          </button>
+          <div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <h2 style="font-size: 15px; font-weight: 700; color: var(--text-primary); letter-spacing: -0.01em;">{{ currentRoom }}</h2>
+              <span class="status-badge" :class="connected ? 'live' : 'offline'">
+                <span class="status-dot" :class="connected ? 'live' : 'offline'"></span>
+                {{ connected ? 'Live' : 'Offline' }}
+              </span>
+            </div>
+            <p style="font-size: 11px; color: var(--text-tertiary); margin-top: 2px;">
+              {{ clientCount }} device{{ clientCount !== 1 ? 's' : '' }} connected
+            </p>
+          </div>
+        </div>
+
+        <div class="header-actions" style="display: flex; align-items: center; gap: 8px;">
+          <button id="copy-btn" @click="copyToClipboard" class="btn btn-ghost">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+              <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+            </svg>
+            Copy
+          </button>
+          <button id="clear-btn" @click="clearText" class="btn btn-ghost danger">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="3 6 5 6 21 6"/>
+              <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
+            </svg>
+            Clear
+          </button>
+        </div>
+      </header>
+
+      <!-- Textarea Card -->
+      <div class="textarea-card">
+        <textarea
+          id="clip-area"
+          v-model="text"
+          @input="onTextInput"
+          placeholder="Start typing or paste something here…&#10;&#10;Everything you write syncs instantly to all connected devices in this room."
+          spellcheck="false"
+          class="clip-textarea"
+          style="flex: 1;"
+        ></textarea>
+        <div class="card-footer">
+          <span>{{ charCount.toLocaleString() }} characters</span>
+          <span v-if="lastSync">Synced {{ lastSyncAgo }}</span>
+        </div>
+      </div>
+
+    </div>
+  </template>
+
+  <!-- ============================================ -->
+  <!-- TOAST                                        -->
+  <!-- ============================================ -->
+  <div class="toast-container" v-if="toast.visible">
+    <div class="toast" :class="toast.entering ? 'toast-in' : 'toast-out'">
+      <svg v-if="toast.icon === 'check'" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--accent-emerald)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="20 6 9 17 4 12"/>
+      </svg>
+      <span>{{ toast.message }}</span>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const { createApp, ref, computed, onMounted, onUnmounted, nextTick } = Vue;
+
+createApp({
+  setup() {
+    const view = ref('landing');
+    const roomInput = ref('');
+    const currentRoom = ref('');
+    const text = ref('');
+    const connected = ref(false);
+    const clientCount = ref(0);
+    const lastSync = ref(null);
+    const recentRooms = ref([]);
+
+    const toast = ref({ visible: false, message: '', icon: 'check', entering: true });
+    let toastTimer = null;
+
+    let ws = null;
+    let reconnectTimer = null;
+    let isRemoteUpdate = false;
+
+    // --- Computed ---
+    const charCount = computed(() => text.value.length);
+    const lastSyncAgo = computed(() => {
+      if (!lastSync.value) return '';
+      const s = Math.round((Date.now() - lastSync.value) / 1000);
+      if (s < 5) return 'just now';
+      if (s < 60) return `${s}s ago`;
+      return `${Math.floor(s / 60)}m ago`;
+    });
+
+    // --- Toast ---
+    function showToast(message, icon = 'check') {
+      clearTimeout(toastTimer);
+      toast.value = { visible: true, message, icon, entering: true };
+      toastTimer = setTimeout(() => {
+        toast.value.entering = false;
+        setTimeout(() => { toast.value.visible = false; }, 300);
+      }, 2200);
+    }
+
+    // --- Recent Rooms ---
+    function loadRecent() {
+      try {
+        const stored = localStorage.getItem('clipsync_recent');
+        if (stored) recentRooms.value = JSON.parse(stored).slice(0, 5);
+      } catch {}
+    }
+    function saveRecent(room) {
+      const list = [room, ...recentRooms.value.filter(r => r !== room)].slice(0, 5);
+      recentRooms.value = list;
+      localStorage.setItem('clipsync_recent', JSON.stringify(list));
+    }
+
+    // --- WebSocket ---
+    function connectWS() {
+      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+      ws = new WebSocket(`${proto}://${location.host}`);
+
+      ws.onopen = () => {
+        connected.value = true;
+        ws.send(JSON.stringify({ type: 'join', room: currentRoom.value }));
+      };
+
+      ws.onmessage = (e) => {
+        const msg = JSON.parse(e.data);
+
+        if (msg.type === 'init') {
+          isRemoteUpdate = true;
+          text.value = msg.text || '';
+          isRemoteUpdate = false;
+          clientCount.value = msg.clients || 0;
+          lastSync.value = Date.now();
+        }
+
+        if (msg.type === 'update') {
+          isRemoteUpdate = true;
+          text.value = msg.text;
+          isRemoteUpdate = false;
+          lastSync.value = Date.now();
+        }
+
+        if (msg.type === 'clients') {
+          clientCount.value = msg.clients || 0;
+        }
+      };
+
+      ws.onclose = () => {
+        connected.value = false;
+        if (view.value === 'room') {
+          reconnectTimer = setTimeout(connectWS, 1500);
+        }
+      };
+
+      ws.onerror = () => ws.close();
+    }
+
+    function disconnectWS() {
+      clearTimeout(reconnectTimer);
+      if (ws) {
+        ws.onclose = null;
+        ws.close();
+        ws = null;
+      }
+      connected.value = false;
+    }
+
+    // --- Actions ---
+    function joinRoom() {
+      if (!roomInput.value) return;
+      currentRoom.value = roomInput.value;
+      saveRecent(currentRoom.value);
+      view.value = 'room';
+      nextTick(() => connectWS());
+    }
+
+    function leaveRoom() {
+      disconnectWS();
+      text.value = '';
+      currentRoom.value = '';
+      clientCount.value = 0;
+      view.value = 'landing';
+    }
+
+    function onTextInput() {
+      if (isRemoteUpdate) return;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'update', text: text.value }));
+        lastSync.value = Date.now();
+      }
+    }
+
+    async function copyToClipboard() {
+      try {
+        await navigator.clipboard.writeText(text.value);
+        showToast('Copied to clipboard');
+      } catch {
+        showToast('Copy failed — check permissions');
+      }
+    }
+
+    function clearText() {
+      text.value = '';
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'clear' }));
+      }
+      showToast('Clipboard cleared');
+    }
+
+    // --- Lifecycle ---
+    let syncInterval;
+    onMounted(() => {
+      loadRecent();
+      syncInterval = setInterval(() => { lastSync.value = lastSync.value; }, 5000);
+    });
+    onUnmounted(() => {
+      clearInterval(syncInterval);
+      disconnectWS();
+    });
+
+    return {
+      view, roomInput, currentRoom, text, connected, clientCount,
+      charCount, lastSync, lastSyncAgo, recentRooms, toast,
+      joinRoom, leaveRoom, onTextInput, copyToClipboard, clearText,
+    };
+  }
+}).mount('#app');
+</script>
+
+</body>
+</html>
