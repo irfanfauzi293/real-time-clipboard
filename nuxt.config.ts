@@ -2,14 +2,13 @@
 export default defineNuxtConfig({
   compatibilityDate: '2024-04-03',
   devtools: { enabled: true },
-  modules: ['@nuxtjs/supabase'],
+  modules: [],
   css: ['~/assets/css/main.css'],
-  supabase: {
-    // These tell the Supabase module to use the Vercel-injected env vars automatically.
-    // If they are missing, it throws an error at build time.
-    url: process.env.SUPABASE_URL,
-    key: process.env.SUPABASE_ANON_KEY,
-    redirect: false // Don't redirect unauthenticated users since we use anon rooms
+  runtimeConfig: {
+    public: {
+      supabaseUrl: process.env.SUPABASE_URL,
+      supabaseKey: process.env.SUPABASE_ANON_KEY
+    }
   },
   app: {
     head: {

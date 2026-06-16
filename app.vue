@@ -165,8 +165,10 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { createClient } from '@supabase/supabase-js'
 
-const sb = useSupabaseClient()
+const config = useRuntimeConfig()
+const sb = createClient(config.public.supabaseUrl, config.public.supabaseKey)
 
 const view = ref('landing')
 const roomInput = ref('')
