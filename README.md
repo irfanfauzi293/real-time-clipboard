@@ -2,9 +2,9 @@
 
 Real-time clipboard sharing across devices with private rooms. Type on one device, see it instantly on another.
 
-![Node.js](https://img.shields.io/badge/Node.js-18+-339933?logo=node.js&logoColor=white)
-![Supabase](https://img.shields.io/badge/Supabase-Realtime-3ECF8E?logo=supabase&logoColor=white)
+![Nuxt](https://img.shields.io/badge/Nuxt-3-00DC82?logo=nuxt.js&logoColor=white)
 ![Vue.js](https://img.shields.io/badge/Vue.js-3-4FC08D?logo=vue.js&logoColor=white)
+![Supabase](https://img.shields.io/badge/Supabase-Realtime-3ECF8E?logo=supabase&logoColor=white)
 ![Vercel](https://img.shields.io/badge/Vercel-Deployed-black?logo=vercel)
 
 ## Features
@@ -14,17 +14,17 @@ Real-time clipboard sharing across devices with private rooms. Type on one devic
 - **Copy & Clear** — One-click copy to device clipboard and clear shared content.
 - **Recent Rooms** — Quick access to previously visited rooms (stored in localStorage).
 - **100% Free** — Supabase free tier with hard limits, no surprise charges.
-- **No Build Step** — Pure static frontend with Vue 3 via CDN.
+- **Zero Configuration** — Fully integrated Nuxt 3 setup.
 
 ## Tech Stack
 
 | Layer    | Technology                         |
 |----------|------------------------------------|
-| Frontend | Vue 3 (CDN) + Vanilla CSS          |
+| Frontend | Nuxt 3 + Vue 3                     |
+| Styling  | Vanilla CSS                        |
 | Realtime | Supabase Realtime (WebSocket)      |
 | Database | Supabase PostgreSQL (free tier)    |
-| Hosting  | Vercel (static + serverless)       |
-| Server   | Express (local dev only)           |
+| Hosting  | Vercel (zero-config Nuxt support)  |
 
 ## Quick Start (Local)
 
@@ -40,8 +40,8 @@ npm install
 echo SUPABASE_URL=https://your-project.supabase.co > .env
 echo SUPABASE_ANON_KEY=your-anon-key >> .env
 
-# Run
-npm start
+# Run development server
+npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000) in your browser.
@@ -77,25 +77,25 @@ CREATE POLICY "Allow public access" ON rooms FOR ALL USING (true) WITH CHECK (tr
 | `SUPABASE_URL`     | `https://your-project.supabase.co` |
 | `SUPABASE_ANON_KEY`| Your anon/public key               |
 
-4. Deploy — done.
+4. Deploy — done. Vercel automatically detects the Nuxt 3 framework and handles the build.
 
 ## Project Structure
 
 ```
 real-time-clipboard/
-├── api/
-│   └── config.js      # Serverless function — serves Supabase config from env vars
-├── index.html         # Single-page app (Vue 3 + Supabase Realtime client)
-├── server.js          # Express static server (local dev only)
+├── app.vue            # Main Nuxt entrypoint (Vue 3 Composition API)
+├── nuxt.config.ts     # Nuxt config + runtime variables
+├── assets/
+│   └── css/main.css   # Global styles
 ├── .env               # Local environment variables (gitignored)
-├── package.json
-└── .gitignore
+├── package.json       # Dependencies and scripts
+└── vercel.json        # Explicit Vercel build settings
 ```
 
 ## How It Works
 
 1. Enter a **room code** on the landing page.
-2. The frontend fetches Supabase credentials from `/api/config` (env vars, not hardcoded).
+2. The frontend connects to Supabase securely via Nuxt's `runtimeConfig`.
 3. A Supabase Realtime channel subscribes to `postgres_changes` for that room row.
 4. When you type, the text is debounced (400ms) then written to the `rooms` table.
 5. Supabase broadcasts the change via WebSocket to all other subscribed clients instantly.
@@ -106,7 +106,6 @@ real-time-clipboard/
 |--------------------|----------|------------------------------------|
 | `SUPABASE_URL`     | Yes      | Supabase project URL               |
 | `SUPABASE_ANON_KEY`| Yes      | Supabase anon/public key           |
-| `PORT`             | No       | Local dev server port (default: 3000) |
 
 ## Supabase Free Tier Limits
 
