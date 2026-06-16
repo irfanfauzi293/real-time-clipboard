@@ -8,8 +8,8 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 // --- Upstash Redis via REST API (no driver needed) ---
-const UPSTASH_URL = process.env.UPSTASH_REDIS_REST_URL;
-const UPSTASH_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
+const UPSTASH_URL = process.env.UPSTASH_KV_REST_API_URL;
+const UPSTASH_TOKEN = process.env.UPSTASH_KV_REST_API_TOKEN;
 
 async function redisCommand(...args) {
   const res = await fetch(`${UPSTASH_URL}`, {
