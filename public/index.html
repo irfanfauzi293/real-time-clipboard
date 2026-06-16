@@ -481,12 +481,10 @@
               <h2 style="font-size: 15px; font-weight: 700; color: var(--text-primary); letter-spacing: -0.01em;">{{ currentRoom }}</h2>
               <span class="status-badge" :class="connected ? 'live' : 'offline'">
                 <span class="status-dot" :class="connected ? 'live' : 'offline'"></span>
-                {{ connected ? 'Live' : 'Offline' }}
+                {{ connected ? 'Live' : 'Syncing…' }}
               </span>
             </div>
-            <p style="font-size: 11px; color: var(--text-tertiary); margin-top: 2px;">
-              {{ clientCount }} device{{ clientCount !== 1 ? 's' : '' }} connected
-            </p>
+            <p style="font-size: 11px; color: var(--text-tertiary); margin-top: 2px;">Polling every 800ms</p>
           </div>
         </div>
 
@@ -552,16 +550,20 @@ createApp({
     const currentRoom = ref('');
     const text = ref('');
     const connected = ref(false);
-    const clientCount = ref(0);
     const lastSync = ref(null);
     const recentRooms = ref([]);
 
     const toast = ref({ visible: false, message: '', icon: 'check', entering: true });
     let toastTimer = null;
 
-    let ws = null;
-    let reconnectTimer = null;
+    // Polling state
+    let pollTimer = null;
+    let localVersion = 0;
     let isRemoteUpdate = false;
+    let pendingUpdate = null;
+    let debounceTimer = null;
+    const POLL_INTERVAL = 800;
+    const DEBOUNCE_MS = 300;
 
     // --- Computed ---
     const charCount = computed(() => text.value.length);
@@ -596,57 +598,54 @@ createApp({
       localStorage.setItem('clipsync_recent', JSON.stringify(list));
     }
 
-    // --- WebSocket ---
-    function connectWS() {
-      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-      ws = new WebSocket(`${proto}://${location.host}`);
-
-      ws.onopen = () => {
+    // --- HTTP Polling ---
+    async function fetchRoom() {
+      try {
+        const res = await fetch(`/api/rooms/${encodeURIComponent(currentRoom.value)}`);
+        if (!res.ok) throw new Error('fetch failed');
+        const data = await res.json();
         connected.value = true;
-        ws.send(JSON.stringify({ type: 'join', room: currentRoom.value }));
-      };
 
-      ws.onmessage = (e) => {
-        const msg = JSON.parse(e.data);
-
-        if (msg.type === 'init') {
+        // Only update if server has a newer version than what we last sent
+        if (data.version > localVersion) {
+          localVersion = data.version;
           isRemoteUpdate = true;
-          text.value = msg.text || '';
-          isRemoteUpdate = false;
-          clientCount.value = msg.clients || 0;
-          lastSync.value = Date.now();
-        }
-
-        if (msg.type === 'update') {
-          isRemoteUpdate = true;
-          text.value = msg.text;
+          text.value = data.text;
           isRemoteUpdate = false;
           lastSync.value = Date.now();
         }
-
-        if (msg.type === 'clients') {
-          clientCount.value = msg.clients || 0;
-        }
-      };
-
-      ws.onclose = () => {
+      } catch {
         connected.value = false;
-        if (view.value === 'room') {
-          reconnectTimer = setTimeout(connectWS, 1500);
-        }
-      };
-
-      ws.onerror = () => ws.close();
+      }
     }
 
-    function disconnectWS() {
-      clearTimeout(reconnectTimer);
-      if (ws) {
-        ws.onclose = null;
-        ws.close();
-        ws = null;
-      }
+    function startPolling() {
+      fetchRoom(); // Initial fetch
+      pollTimer = setInterval(fetchRoom, POLL_INTERVAL);
+    }
+
+    function stopPolling() {
+      clearInterval(pollTimer);
+      clearTimeout(debounceTimer);
+      pollTimer = null;
       connected.value = false;
+    }
+
+    async function pushUpdate(newText) {
+      try {
+        const res = await fetch(`/api/rooms/${encodeURIComponent(currentRoom.value)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: newText }),
+        });
+        if (!res.ok) throw new Error('push failed');
+        const data = await res.json();
+        localVersion = data.version;
+        lastSync.value = Date.now();
+        connected.value = true;
+      } catch {
+        connected.value = false;
+      }
     }
 
     // --- Actions ---
@@ -654,24 +653,26 @@ createApp({
       if (!roomInput.value) return;
       currentRoom.value = roomInput.value;
       saveRecent(currentRoom.value);
+      localVersion = 0;
       view.value = 'room';
-      nextTick(() => connectWS());
+      nextTick(() => startPolling());
     }
 
     function leaveRoom() {
-      disconnectWS();
+      stopPolling();
       text.value = '';
       currentRoom.value = '';
-      clientCount.value = 0;
+      localVersion = 0;
       view.value = 'landing';
     }
 
     function onTextInput() {
       if (isRemoteUpdate) return;
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'update', text: text.value }));
-        lastSync.value = Date.now();
-      }
+      // Debounce outgoing updates
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        pushUpdate(text.value);
+      }, DEBOUNCE_MS);
     }
 
     async function copyToClipboard() {
@@ -683,27 +684,33 @@ createApp({
       }
     }
 
-    function clearText() {
+    async function clearText() {
       text.value = '';
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'clear' }));
-      }
+      try {
+        const res = await fetch(`/api/rooms/${encodeURIComponent(currentRoom.value)}`, {
+          method: 'DELETE',
+        });
+        if (res.ok) {
+          const data = await res.json();
+          localVersion = data.version;
+        }
+      } catch {}
       showToast('Clipboard cleared');
     }
 
     // --- Lifecycle ---
-    let syncInterval;
+    let syncDisplayInterval;
     onMounted(() => {
       loadRecent();
-      syncInterval = setInterval(() => { lastSync.value = lastSync.value; }, 5000);
+      syncDisplayInterval = setInterval(() => { lastSync.value = lastSync.value; }, 5000);
     });
     onUnmounted(() => {
-      clearInterval(syncInterval);
-      disconnectWS();
+      clearInterval(syncDisplayInterval);
+      stopPolling();
     });
 
     return {
-      view, roomInput, currentRoom, text, connected, clientCount,
+      view, roomInput, currentRoom, text, connected,
       charCount, lastSync, lastSyncAgo, recentRooms, toast,
       joinRoom, leaveRoom, onTextInput, copyToClipboard, clearText,
     };

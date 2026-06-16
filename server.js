@@ -1,110 +1,95 @@
 const express = require('express');
-const http = require('http');
-const { WebSocketServer } = require('ws');
 const path = require('path');
 
 const app = express();
-const server = http.createServer(app);
-const wss = new WebSocketServer({ server });
-
-// --- In-memory storage ---
-const roomsData = {};   // roomCode -> { text: string }
-const roomClients = {};  // roomCode -> Set<ws>
+app.use(express.json());
 
 // --- Static files ---
 app.use(express.static(path.join(__dirname, 'public')));
 
-// --- WebSocket handling ---
-wss.on('connection', (ws) => {
-  let currentRoom = null;
+// --- Upstash Redis via REST API (no driver needed) ---
+const UPSTASH_URL = process.env.UPSTASH_REDIS_REST_URL;
+const UPSTASH_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
 
-  ws.on('message', (raw) => {
-    let msg;
-    try {
-      msg = JSON.parse(raw);
-    } catch {
-      return;
-    }
-
-    const { type, room, text } = msg;
-
-    // --- Join a room ---
-    if (type === 'join' && room) {
-      // Leave previous room if any
-      if (currentRoom && roomClients[currentRoom]) {
-        roomClients[currentRoom].delete(ws);
-        if (roomClients[currentRoom].size === 0) {
-          delete roomClients[currentRoom];
-        }
-      }
-
-      currentRoom = room;
-
-      if (!roomsData[currentRoom]) {
-        roomsData[currentRoom] = { text: '' };
-      }
-      if (!roomClients[currentRoom]) {
-        roomClients[currentRoom] = new Set();
-      }
-      roomClients[currentRoom].add(ws);
-
-      // Send current room content + client count
-      ws.send(JSON.stringify({
-        type: 'init',
-        text: roomsData[currentRoom].text,
-        clients: roomClients[currentRoom].size,
-      }));
-
-      // Notify others of updated client count
-      broadcastClientCount(currentRoom);
-    }
-
-    // --- Text update ---
-    if (type === 'update' && currentRoom && text !== undefined) {
-      roomsData[currentRoom].text = text;
-
-      // Broadcast to all OTHER clients in the room
-      for (const client of roomClients[currentRoom] || []) {
-        if (client !== ws && client.readyState === 1) {
-          client.send(JSON.stringify({ type: 'update', text }));
-        }
-      }
-    }
-
-    // --- Clear ---
-    if (type === 'clear' && currentRoom) {
-      roomsData[currentRoom].text = '';
-
-      for (const client of roomClients[currentRoom] || []) {
-        client.send(JSON.stringify({ type: 'update', text: '' }));
-      }
-    }
+async function redisCommand(...args) {
+  const res = await fetch(`${UPSTASH_URL}`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${UPSTASH_TOKEN}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(args),
   });
-
-  ws.on('close', () => {
-    if (currentRoom && roomClients[currentRoom]) {
-      roomClients[currentRoom].delete(ws);
-      broadcastClientCount(currentRoom);
-      if (roomClients[currentRoom].size === 0) {
-        delete roomClients[currentRoom];
-        // Optional: keep roomsData for reconnection, or delete:
-        // delete roomsData[currentRoom];
-      }
-    }
-  });
-});
-
-function broadcastClientCount(room) {
-  const count = roomClients[room]?.size || 0;
-  for (const client of roomClients[room] || []) {
-    if (client.readyState === 1) {
-      client.send(JSON.stringify({ type: 'clients', clients: count }));
-    }
-  }
+  const data = await res.json();
+  if (data.error) throw new Error(data.error);
+  return data.result;
 }
 
-// --- Start ---
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`✓ Server running → http://localhost:${PORT}`);
+// --- API Routes ---
+
+// GET /api/rooms/:id — Get room text + version
+app.get('/api/rooms/:id', async (req, res) => {
+  try {
+    const roomId = req.params.id;
+    const [text, version] = await Promise.all([
+      redisCommand('GET', `room:${roomId}:text`),
+      redisCommand('GET', `room:${roomId}:version`),
+    ]);
+    res.json({
+      text: text || '',
+      version: parseInt(version) || 0,
+    });
+  } catch (err) {
+    console.error('GET room error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch room data' });
+  }
 });
+
+// PUT /api/rooms/:id — Update room text
+app.put('/api/rooms/:id', async (req, res) => {
+  try {
+    const roomId = req.params.id;
+    const { text } = req.body;
+    if (text === undefined) return res.status(400).json({ error: 'text is required' });
+
+    const version = await redisCommand('INCR', `room:${roomId}:version`);
+    await Promise.all([
+      redisCommand('SET', `room:${roomId}:text`, text),
+      // Auto-expire rooms after 24 hours of no updates
+      redisCommand('EXPIRE', `room:${roomId}:text`, 86400),
+      redisCommand('EXPIRE', `room:${roomId}:version`, 86400),
+    ]);
+    res.json({ version });
+  } catch (err) {
+    console.error('PUT room error:', err.message);
+    res.status(500).json({ error: 'Failed to update room' });
+  }
+});
+
+// DELETE /api/rooms/:id — Clear room text
+app.delete('/api/rooms/:id', async (req, res) => {
+  try {
+    const roomId = req.params.id;
+    const version = await redisCommand('INCR', `room:${roomId}:version`);
+    await redisCommand('SET', `room:${roomId}:text`, '');
+    res.json({ version });
+  } catch (err) {
+    console.error('DELETE room error:', err.message);
+    res.status(500).json({ error: 'Failed to clear room' });
+  }
+});
+
+// --- Fallback: serve index.html for SPA ---
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// --- Start (local dev only — Vercel uses serverless export) ---
+if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
+  const PORT = process.env.PORT || 3000;
+  app.listen(PORT, () => {
+    console.log(`✓ Server running → http://localhost:${PORT}`);
+  });
+}
+
+module.exports = app;
