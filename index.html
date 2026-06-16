@@ -541,26 +541,10 @@
 <script>
 const { createApp, ref, computed, onMounted, onUnmounted, nextTick } = Vue;
 
-// --- Supabase client (loaded from env via API) ---
-let sb = null;
-
-async function initSupabase() {
-  if (sb) return sb;
-  try {
-    const res = await fetch('/api/config');
-    const data = await res.json();
-    
-    if (!res.ok) {
-      throw new Error(data.error || `HTTP error ${res.status}`);
-    }
-    
-    sb = supabase.createClient(data.supabaseUrl, data.supabaseKey);
-    return sb;
-  } catch (err) {
-    console.error('Config fetch error:', err);
-    throw new Error(err.message);
-  }
-}
+// --- Supabase client ---
+const SUPABASE_URL = 'https://kvjglkwdbunocyailsea.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_d9iujosa52AmGqa-JJXaJg_zceGJowj';
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 createApp({
   setup() {
@@ -617,14 +601,8 @@ createApp({
     // --- Supabase Realtime ---
     async function subscribeToRoom(roomId) {
       try {
-        const client = await initSupabase();
-
-        if (!client) {
-          throw new Error('Supabase configuration missing');
-        }
-
         // Upsert: create room if it doesn't exist, or fetch existing
-        const { data, error } = await client
+        const { data, error } = await sb
           .from('rooms')
           .upsert({ id: roomId }, { onConflict: 'id', ignoreDuplicates: true })
           .select()
@@ -632,7 +610,7 @@ createApp({
 
         if (error && error.code !== '23505') {
           // If upsert fails (not a duplicate), try just fetching
-          const { data: existing } = await client.from('rooms').select().eq('id', roomId).single();
+          const { data: existing } = await sb.from('rooms').select().eq('id', roomId).single();
           if (existing) {
             text.value = existing.text || '';
           }
@@ -643,7 +621,7 @@ createApp({
       lastSync.value = Date.now();
 
       // Subscribe to realtime changes on this room
-      channel = client
+      channel = sb
         .channel(`room-${roomId}`)
         .on(
           'postgres_changes',
