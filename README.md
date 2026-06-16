@@ -11,8 +11,10 @@ Real-time clipboard sharing across devices with private rooms. Type on one devic
 
 - **Private Rooms** — Create or join a room with any code. Only people with the code can access it.
 - **Real-Time Sync** — Text syncs instantly across devices via Supabase Realtime (WebSocket).
+- **Split-Screen UI** — Desktop-grade split layout that is fully responsive on mobile.
 - **Copy & Clear** — One-click copy to device clipboard and clear shared content.
 - **Recent Rooms** — Quick access to previously visited rooms (stored in localStorage).
+- **Auto-Cleanup Ready** — Easily configured daily cleanup using Supabase `pg_cron`.
 - **100% Free** — Supabase free tier with hard limits, no surprise charges.
 - **Zero Configuration** — Fully integrated Nuxt 3 setup.
 
@@ -65,6 +67,13 @@ CREATE POLICY "Allow public access" ON rooms FOR ALL USING (true) WITH CHECK (tr
 ```
 
 3. Go to **Settings → API** and copy your **Project URL** and **anon/public key**.
+
+4. **(Optional) Auto-Delete Old Rooms**: To keep your free database clean, you can schedule a deletion every night at midnight using Supabase's `pg_cron`. Run this in the SQL Editor:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS pg_cron;
+SELECT cron.schedule('delete-rooms-midnight', '0 0 * * *', 'DELETE FROM rooms;');
+```
 
 ## Deploy to Vercel
 
