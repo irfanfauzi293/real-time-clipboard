@@ -14,12 +14,9 @@ app.get('/api/config', (req, res) => {
   });
 });
 
-// --- Static files ---
-app.use(express.static(path.join(__dirname, 'public')));
-
-// --- SPA fallback ---
+// --- SPA fallback (serves index.html from root) ---
 app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  res.sendFile(path.join(__dirname, 'index.html'));
 });
 
 // --- Start ---

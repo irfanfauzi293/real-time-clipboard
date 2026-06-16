@@ -85,12 +85,10 @@ CREATE POLICY "Allow public access" ON rooms FOR ALL USING (true) WITH CHECK (tr
 real-time-clipboard/
 ├── api/
 │   └── config.js      # Serverless function — serves Supabase config from env vars
-├── public/
-│   └── index.html     # Single-page app (Vue 3 + Supabase Realtime client)
+├── index.html         # Single-page app (Vue 3 + Supabase Realtime client)
 ├── server.js          # Express static server (local dev only)
 ├── .env               # Local environment variables (gitignored)
 ├── package.json
-├── vercel.json
 └── .gitignore
 ```
 
