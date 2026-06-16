@@ -546,10 +546,16 @@ let sb = null;
 
 async function initSupabase() {
   if (sb) return sb;
-  const res = await fetch('/api/config');
-  const { supabaseUrl, supabaseKey } = await res.json();
-  sb = supabase.createClient(supabaseUrl, supabaseKey);
-  return sb;
+  try {
+    const res = await fetch('/api/config');
+    const { supabaseUrl, supabaseKey } = await res.json();
+    if (!supabaseUrl || !supabaseKey) throw new Error('Missing environment variables');
+    sb = supabase.createClient(supabaseUrl, supabaseKey);
+    return sb;
+  } catch (err) {
+    console.error('Config fetch error:', err);
+    throw new Error('Failed to load Supabase config. Are Vercel env vars set?');
+  }
 }
 
 createApp({
@@ -606,24 +612,29 @@ createApp({
 
     // --- Supabase Realtime ---
     async function subscribeToRoom(roomId) {
-      const client = await initSupabase();
+      try {
+        const client = await initSupabase();
 
-      // Upsert: create room if it doesn't exist, or fetch existing
-      const { data, error } = await client
-        .from('rooms')
-        .upsert({ id: roomId }, { onConflict: 'id', ignoreDuplicates: true })
-        .select()
-        .single();
-
-      if (error && error.code !== '23505') {
-        // If upsert fails (not a duplicate), try just fetching
-        const { data: existing } = await client.from('rooms').select().eq('id', roomId).single();
-        if (existing) {
-          text.value = existing.text || '';
+        if (!client) {
+          throw new Error('Supabase configuration missing');
         }
-      } else if (data) {
-        text.value = data.text || '';
-      }
+
+        // Upsert: create room if it doesn't exist, or fetch existing
+        const { data, error } = await client
+          .from('rooms')
+          .upsert({ id: roomId }, { onConflict: 'id', ignoreDuplicates: true })
+          .select()
+          .single();
+
+        if (error && error.code !== '23505') {
+          // If upsert fails (not a duplicate), try just fetching
+          const { data: existing } = await client.from('rooms').select().eq('id', roomId).single();
+          if (existing) {
+            text.value = existing.text || '';
+          }
+        } else if (data) {
+          text.value = data.text || '';
+        }
 
       lastSync.value = Date.now();
 
@@ -649,6 +660,11 @@ createApp({
         .subscribe((status) => {
           connected.value = (status === 'SUBSCRIBED');
         });
+      } catch (err) {
+        console.error('Connection error:', err);
+        showToast('Connection failed: ' + err.message, 'error');
+        connected.value = false;
+      }
     }
 
     function unsubscribeFromRoom() {
