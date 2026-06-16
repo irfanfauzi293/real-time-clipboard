@@ -135,7 +135,7 @@
             id="clip-area"
             v-model="text"
             @input="onTextInput"
-            placeholder="Start typing or paste something here…\n\nEverything you write syncs instantly to all connected devices in this room."
+            placeholder="Start typing or paste something here…&#10;&#10;Everything you write syncs instantly to all connected devices in this room."
             spellcheck="false"
             class="clip-textarea"
             style="flex: 1;"
