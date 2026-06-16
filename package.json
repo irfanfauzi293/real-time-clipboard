@@ -1,14 +1,19 @@
 {
   "name": "real-time-clipboard",
   "version": "1.0.0",
-  "description": "Real-time web clipboard with private rooms",
-  "main": "server.js",
+  "private": true,
+  "description": "Real-time web clipboard with private rooms using Nuxt 3",
+  "type": "module",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node server.js"
+    "build": "nuxt build",
+    "dev": "nuxt dev",
+    "generate": "nuxt generate",
+    "preview": "nuxt preview",
+    "postinstall": "nuxt prepare"
   },
   "dependencies": {
-    "dotenv": "^17.4.2",
-    "express": "^4.21.0"
+    "@nuxtjs/supabase": "^1.4.1",
+    "nuxt": "^3.12.3",
+    "vue": "^3.4.34"
   }
 }
